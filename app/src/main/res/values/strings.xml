@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">BoardTest</string>
+    <string name="network_info">测试说明：ping 当前网关IP：</string>
+</resources>
