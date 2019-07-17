@@ -1,11 +1,13 @@
 package com.example.boardtest;
 
+import android.Manifest;
 import android.app.admin.DevicePolicyManager;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.SurfaceTexture;
 import android.hardware.usb.UsbAccessory;
@@ -22,6 +24,9 @@ import android.os.Environment;
 import android.os.Handler;
 import android.os.Message;
 import android.os.SystemClock;
+import android.provider.Settings;
+import android.support.v4.app.ActivityCompat;
+import android.support.v4.content.ContextCompat;
 import android.support.v4.content.LocalBroadcastManager;
 import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
@@ -31,6 +36,7 @@ import android.view.View;
 import android.view.WindowManager;
 import android.view.WindowManager.LayoutParams;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.RelativeLayout;
@@ -49,6 +55,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.io.UnsupportedEncodingException;
 import java.lang.ref.WeakReference;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
@@ -57,12 +64,16 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Timer;
+import java.util.TimerTask;
 
 import android_serialport_api.SerialPort;
 
 public class MainActivity extends AppCompatActivity implements MediaPlayer.OnCompletionListener {
     private static final String TAG = "MainActivity";
     private static final String ACTION_INTENT_RECEIVER = "com.serenegiant.widget.onSurfaceTextureAvailable";
+    private static final int MY_PERMISSIONS_REQUEST_CALL_PHONE = 1;
+    private static String tel = "15306160620";
     private TextView tv_backgrount;
     private VideoView vv_play;
     private LinearLayout ll_serialport;
@@ -70,6 +81,7 @@ public class MainActivity extends AppCompatActivity implements MediaPlayer.OnCom
     private LinearLayout ll_usbdevices;
     private LinearLayout ll_camera;
     private LinearLayout ll_mic;
+    private LinearLayout ll_call;
 
     private static final int VIDEO_TEST = 0x01;
     private static final int NET_TEST = 0x02;
@@ -90,11 +102,14 @@ public class MainActivity extends AppCompatActivity implements MediaPlayer.OnCom
     private static final int USB_DISCONNECT = 0x17;
     private static final int SERIAL_RESULT = 0x18;
     private static final int PING_RESULT = 0x19;
+
+    private static final int CALL_RESULT = 0x20;
+    private static final int HUP_RESULT = 0x21;
+
+    //串口
     private boolean ttyALL_exit = true;
     private List<String> serialports;
     public static final int BAUDRATE = 9600;
-
-    //串口
     protected SerialPort mSerialPort;
     protected InputStream mInputStream;
     protected OutputStream mOutputStream;
@@ -126,6 +141,11 @@ public class MainActivity extends AppCompatActivity implements MediaPlayer.OnCom
     private Map<UsbDevice, CameraResStruct> usbMap;
     private LocalBroadcastManager localBroadcastManager;
     private LocalReceiver receiver;
+
+    //拨打电话相关
+    private Button btn_call;
+    private Button btn_hangup;
+    private EditText et_tel;
 
     private final MyHandler mHandler = new MyHandler(this);
 
@@ -235,6 +255,22 @@ public class MainActivity extends AppCompatActivity implements MediaPlayer.OnCom
         public void handleMessage(Message msg) {
             MainActivity activity = mActivityRef.get();
             switch (msg.what) {
+                case HUP_RESULT:
+                    String res_hup = (String) msg.obj;
+                    if (res_hup.contains("OK")) {
+                        Toast.makeText(activity, "电话挂断成功！", Toast.LENGTH_SHORT).show();
+                    } else if (res_hup.contains("ERROR")) {
+                        Toast.makeText(activity, "电话挂断失败！", Toast.LENGTH_SHORT).show();
+                    }
+                    break;
+                case CALL_RESULT:
+                    String res_call = (String) msg.obj;
+                    if (res_call.contains("OK")) {
+                        Toast.makeText(activity, "电话拨打成功！", Toast.LENGTH_SHORT).show();
+                    } else {
+                        Toast.makeText(activity, "电话拨打失败！", Toast.LENGTH_SHORT).show();
+                    }
+                    break;
                 case USB_CONNECT:
                 case USB_DISCONNECT:
                     if (state == USB_TEST) {
@@ -259,6 +295,7 @@ public class MainActivity extends AppCompatActivity implements MediaPlayer.OnCom
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        Log.d(TAG, "onCreate: ");
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
@@ -321,6 +358,7 @@ public class MainActivity extends AppCompatActivity implements MediaPlayer.OnCom
         ll_usbdevices = findViewById(R.id.ll_usbdevices);
         ll_camera = findViewById(R.id.ll_camera);
         ll_mic = findViewById(R.id.ll_mic);
+        ll_call = findViewById(R.id.ll_call);
 
         tv_network_test = findViewById(R.id.tv_network_test);
         tv_net_info = findViewById(R.id.tv_net_info);
@@ -333,6 +371,10 @@ public class MainActivity extends AppCompatActivity implements MediaPlayer.OnCom
         stopRecording = findViewById(R.id.StopRecording);
         startRecording = findViewById(R.id.StartRecording);
         playRecording = findViewById(R.id.PlayRecording);
+
+        btn_call = findViewById(R.id.btn_call);
+        btn_hangup = findViewById(R.id.btn_hangup);
+        et_tel = findViewById(R.id.et_tel);
     }
 
     private void initVideo() {
@@ -463,15 +505,12 @@ public class MainActivity extends AppCompatActivity implements MediaPlayer.OnCom
             resetTvs();
             new Thread(sendRunnable).start();
 
-            spu_one.setOnDataReceiveListener(new SerialPortUtil.OnDataReceiveListener() {
-                @Override
-                public void onDataReceive(String name, byte[] buffer, int size) {
-                    Message msg = Message.obtain();
-                    msg.what = SERIAL_RESULT;
-                    msg.obj = name + "Rece";
-                    msg.arg1 = size;
-                    mHandler.sendMessage(msg);
-                }
+            spu_one.setOnDataReceiveListener((name1, buffer, size) -> {
+                Message msg = Message.obtain();
+                msg.what = SERIAL_RESULT;
+                msg.obj = name1 + "Rece";
+                msg.arg1 = size;
+                mHandler.sendMessage(msg);
             });
         }
     }
@@ -671,6 +710,7 @@ public class MainActivity extends AppCompatActivity implements MediaPlayer.OnCom
         ll_usbdevices.setVisibility(View.GONE);
         ll_camera.setVisibility(View.GONE);
         ll_mic.setVisibility(View.GONE);
+        ll_call.setVisibility(View.GONE);
 
         vv_play.setVisibility(View.VISIBLE);
         vv_play.start();
@@ -686,6 +726,7 @@ public class MainActivity extends AppCompatActivity implements MediaPlayer.OnCom
         ll_usbdevices.setVisibility(View.GONE);
         ll_camera.setVisibility(View.GONE);
         ll_mic.setVisibility(View.GONE);
+        ll_call.setVisibility(View.GONE);
 
         ll_network.setVisibility(View.VISIBLE);
 
@@ -693,12 +734,7 @@ public class MainActivity extends AppCompatActivity implements MediaPlayer.OnCom
         tv_net_info.setText(tv_net_info.getText().toString() + getway);
 
         //      new NetPing().execute();
-        new Thread(new Runnable() {
-            @Override
-            public void run() {
-                isAvailableByPing(getway);
-            }
-        }).start();
+        new Thread(() -> isAvailableByPing(getway)).start();
     }
 
     public void onStartSerialPortTest(View view) {
@@ -710,6 +746,7 @@ public class MainActivity extends AppCompatActivity implements MediaPlayer.OnCom
         ll_usbdevices.setVisibility(View.GONE);
         ll_camera.setVisibility(View.GONE);
         ll_mic.setVisibility(View.GONE);
+        ll_call.setVisibility(View.GONE);
 
         ll_serialport.setVisibility(View.VISIBLE);
         ll_serialport.removeAllViews();
@@ -741,6 +778,7 @@ public class MainActivity extends AppCompatActivity implements MediaPlayer.OnCom
         ll_serialport.setVisibility(View.GONE);
         ll_camera.setVisibility(View.GONE);
         ll_mic.setVisibility(View.GONE);
+        ll_call.setVisibility(View.GONE);
 
         ll_usbdevices.setVisibility(View.VISIBLE);
 
@@ -771,6 +809,7 @@ public class MainActivity extends AppCompatActivity implements MediaPlayer.OnCom
         ll_usbdevices.setVisibility(View.GONE);
         ll_serialport.setVisibility(View.GONE);
         ll_mic.setVisibility(View.GONE);
+        ll_call.setVisibility(View.GONE);
 
         ll_camera.setVisibility(View.VISIBLE);
 
@@ -842,7 +881,136 @@ public class MainActivity extends AppCompatActivity implements MediaPlayer.OnCom
         }).start();
     }
 
+    public void onStartTestCall(View view) {
+        vv_play.setVisibility(View.GONE);
+        ll_network.setVisibility(View.GONE);
+        ll_usbdevices.setVisibility(View.GONE);
+        ll_serialport.setVisibility(View.GONE);
+        ll_camera.setVisibility(View.GONE);
+        ll_mic.setVisibility(View.GONE);
+
+        ll_call.setVisibility(View.VISIBLE);
+    }
+
+
+    public void onHungUP(View view) {
+        Toast.makeText(this, "挂断指令已发出，请耐心等候！", Toast.LENGTH_SHORT).show();
+        //开始挂断电话
+        String telString = "ATH0";
+        SerialPortUtil spu_hun = new SerialPortUtil("ttyUSB2", 115200);
+        spu_hun.sendBuffer(telString.getBytes());
+        spu_hun.setOnDataReceiveListener((name1, buffer, size) -> {
+            String buf = null;
+            try {
+                buf = new String(buffer, "UTF-8");
+                //Log.d(TAG, "=call result=>>" + name1 + "=buffer=>>" + buf);
+                Message msg = Message.obtain();
+                msg.what = HUP_RESULT;
+                msg.obj = buf;
+                mHandler.sendMessage(msg);
+            } catch (UnsupportedEncodingException e) {
+                e.printStackTrace();
+            }
+        });
+    }
+
+    public void onCallSerial(View view) {
+        Toast.makeText(this, "拨号指令已发出，请耐心等候！", Toast.LENGTH_SHORT).show();
+        //15秒内不让call
+        btn_call.setEnabled(false);
+        btn_hangup.setEnabled(true);
+
+        Timer timer = new Timer();
+        TimerTask timerTask = new TimerTask() {
+            @Override
+            public void run() {
+                runOnUiThread(() -> {
+                    btn_call.setEnabled(true);
+                });
+            }
+        };
+        timer.schedule(timerTask, 15 * 1000);
+        //开始拨打电话
+        tel = et_tel.getText().toString();
+        String telString = "ATD" + tel + ";";
+        SerialPortUtil spu_call = new SerialPortUtil("ttyUSB2", 115200);
+        spu_call.sendBuffer(telString.getBytes());
+        spu_call.setOnDataReceiveListener((name1, buffer, size) -> {
+            String buf = null;
+            try {
+                buf = new String(buffer, "UTF-8");
+                //Log.d(TAG, "=call result=>>" + name1 + "=buffer=>>" + buf);
+                Message msg = Message.obtain();
+                msg.what = CALL_RESULT;
+                msg.obj = buf;
+                mHandler.sendMessage(msg);
+            } catch (UnsupportedEncodingException e) {
+                e.printStackTrace();
+            }
+        });
+    }
+
+    public void onCall(View view) {
+        vv_play.setVisibility(View.GONE);
+        ll_network.setVisibility(View.GONE);
+        ll_usbdevices.setVisibility(View.GONE);
+        ll_serialport.setVisibility(View.GONE);
+        ll_camera.setVisibility(View.GONE);
+        ll_mic.setVisibility(View.GONE);
+
+        ll_call.setVisibility(View.VISIBLE);
+
+
+        //测试板子用的是串口的atd命令，不用下面的方式
+
+        //callPhone("15306160620");
+        // 检查是否获得了权限（Android6.0运行时权限）
+//        if (ContextCompat.checkSelfPermission(MainActivity.this,
+//                Manifest.permission.CALL_PHONE) != PackageManager.PERMISSION_GRANTED) {
+//            // 没有获得授权，申请授权
+//            if (ActivityCompat.shouldShowRequestPermissionRationale(MainActivity.this,
+//                    Manifest.permission.CALL_PHONE)) {
+//                // 返回值：
+////                          如果app之前请求过该权限,被用户拒绝, 这个方法就会返回true.
+////                          如果用户之前拒绝权限的时候勾选了对话框中”Don’t ask again”的选项,那么这个方法会返回false.
+////                          如果设备策略禁止应用拥有这条权限, 这个方法也返回false.
+//                // 弹窗需要解释为何需要该权限，再次请求授权
+//                Toast.makeText(MainActivity.this, "请授权！", Toast.LENGTH_LONG).show();
+//
+//                // 帮跳转到该应用的设置界面，让用户手动授权
+//                Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+//                Uri uri = Uri.fromParts("package", getPackageName(), null);
+//                intent.setData(uri);
+//                startActivity(intent);
+//            } else {
+//                // 不需要解释为何需要该权限，直接请求授权
+//                ActivityCompat.requestPermissions(MainActivity.this,
+//                        new String[]{Manifest.permission.CALL_PHONE},
+//                        MY_PERMISSIONS_REQUEST_CALL_PHONE);
+//            }
+//        } else {
+//            // 已经获得授权，可以打电话
+//            callPhone(tel);
+//        }
+    }
+
+    /**
+     * 测试板子用的是串口打电话，此方法不用
+     * <p>
+     * 拨打电话（直接拨打电话）
+     *
+     * @param phoneNum 电话号码
+     */
+    public void callPhone(String phoneNum) {
+        Intent intent = new Intent(Intent.ACTION_CALL);
+        Uri data = Uri.parse("tel:" + phoneNum);
+        intent.setData(data);
+        startActivity(intent);
+    }
+
+
     public void onStartMicTest(View view) {
+        Log.d(TAG, "onStartMicTest: ");
         state = MIC_TEST;
 
         vv_play.setVisibility(View.GONE);
@@ -850,6 +1018,7 @@ public class MainActivity extends AppCompatActivity implements MediaPlayer.OnCom
         ll_usbdevices.setVisibility(View.GONE);
         ll_serialport.setVisibility(View.GONE);
         ll_camera.setVisibility(View.GONE);
+        ll_call.setVisibility(View.GONE);
 
         ll_mic.setVisibility(View.VISIBLE);
 
@@ -1234,5 +1403,24 @@ public class MainActivity extends AppCompatActivity implements MediaPlayer.OnCom
                 }
             }
         }
+    }
+
+    // 处理权限申请的回调
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        switch (requestCode) {
+            case MY_PERMISSIONS_REQUEST_CALL_PHONE: {
+                if (grantResults.length > 0
+                        && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                    // 授权成功，继续打电话
+                    callPhone(tel);
+                } else {
+                    // 授权失败！
+                    Toast.makeText(this, "授权失败！", Toast.LENGTH_LONG).show();
+                }
+                break;
+            }
+        }
+
     }
 }

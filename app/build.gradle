@@ -7,7 +7,7 @@ android {
         minSdkVersion 22
         targetSdkVersion 28
         versionCode 1
-        versionName "1.0"
+        versionName "1.1.1"
         testInstrumentationRunner "android.support.test.runner.AndroidJUnitRunner"
     }
     buildTypes {
@@ -33,7 +33,28 @@ android {
         sourceCompatibility = JavaVersion.VERSION_1_8
         targetCompatibility = JavaVersion.VERSION_1_8
     }
+
+    android.applicationVariants.all { variant ->
+        variant.outputs.all {
+            outputFileName = defaultConfig.applicationId.subSequence(defaultConfig.applicationId.lastIndexOf(".")
+                    + 1, defaultConfig.applicationId.length()) + "-V${variant.versionName}-${releaseTime()}.apk"
+        }
+//        variant.outputs.all { output ->
+//            def outputFile = output.outputFile
+//            if (outputFile != null && outputFile.name.endsWith('.apk')) {
+//                outputFileName =
+//                        defaultConfig.applicationId.subSequence(defaultConfig.applicationId.lastIndexOf(".")
+//                                + 1, defaultConfig.applicationId.length()) + "-v" + variant.versionName + "-" +
+//                                releaseTime() + ".apk"
+//            }
+//        }
+    }
 }
+
+def releaseTime() {
+    return new Date().format("yyyyMMdd_HHmmss", TimeZone.getTimeZone("GMT"))
+}
+
 
 dependencies {
     implementation fileTree(dir: 'libs', include: ['*.jar'])
