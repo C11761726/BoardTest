@@ -59,14 +59,19 @@
             android:text="@string/network_info"
             android:textSize="30dp" />
 
-        <TextView
-            android:id="@+id/tv_network_test"
+        <ScrollView
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:background="@android:color/holo_green_dark"
-            android:paddingLeft="20dp"
-            android:text=""
-            android:textSize="25dp" />
+            android:layout_height="wrap_content">
+
+            <TextView
+                android:id="@+id/tv_network_test"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@android:color/holo_green_dark"
+                android:paddingLeft="20dp"
+                android:text=""
+                android:textSize="25dp" />
+        </ScrollView>
     </LinearLayout>
 
     <LinearLayout
@@ -116,6 +121,28 @@
         app:layout_constraintLeft_toLeftOf="parent"
         app:layout_constraintRight_toLeftOf="@id/btn_fun_list"
         app:layout_constraintTop_toTopOf="parent"></LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/ll_rtc"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="100dp"
+        android:orientation="vertical"
+        android:visibility="gone"
+        app:layout_constraintHorizontal_weight="1"
+        app:layout_constraintLeft_toLeftOf="parent"
+        app:layout_constraintRight_toLeftOf="@id/btn_fun_list"
+        app:layout_constraintTop_toTopOf="parent">
+
+        <TextView
+            android:id="@+id/tv_rtc_info"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@android:color/holo_green_dark"
+            android:paddingLeft="20dp"
+            android:text=""
+            android:textSize="45dp" />
+    </LinearLayout>
 
     <LinearLayout
         android:id="@+id/ll_mic"
@@ -287,6 +314,27 @@
             android:layout_height="wrap_content"
             android:onClick="onStartTestCall"
             android:text="拨打电话"
+            android:visibility="visible" />
+
+        <Button
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:onClick="onStartTestWiFi"
+            android:text="切换WIFI"
+            android:visibility="visible" />
+
+        <Button
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:onClick="onStartTestRTC"
+            android:text="测试RTC"
+            android:visibility="visible" />
+
+        <Button
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:onClick="onClose"
+            android:text="退出软件"
             android:visibility="visible" />
     </LinearLayout>
 

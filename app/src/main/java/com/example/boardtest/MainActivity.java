@@ -13,12 +13,14 @@ import android.graphics.SurfaceTexture;
 import android.hardware.usb.UsbAccessory;
 import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbManager;
+import android.media.AudioManager;
 import android.media.MediaPlayer;
 import android.media.MediaRecorder;
 import android.net.DhcpInfo;
 import android.net.Uri;
 import android.net.wifi.WifiManager;
 import android.os.AsyncTask;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
@@ -59,7 +61,9 @@ import java.io.UnsupportedEncodingException;
 import java.lang.ref.WeakReference;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
@@ -82,6 +86,7 @@ public class MainActivity extends AppCompatActivity implements MediaPlayer.OnCom
     private LinearLayout ll_camera;
     private LinearLayout ll_mic;
     private LinearLayout ll_call;
+    private LinearLayout ll_rtc;
 
     private static final int VIDEO_TEST = 0x01;
     private static final int NET_TEST = 0x02;
@@ -89,12 +94,14 @@ public class MainActivity extends AppCompatActivity implements MediaPlayer.OnCom
     private static final int CAMERA_TEST = 0x04;
     private static final int USB_TEST = 0x05;
     private static final int MIC_TEST = 0x06;
+    private static final int RTC_TEST = 0x07;
     private int state;
 
 
     private TextView tv_network_test;
     private TextView tv_net_info;
     private TextView tv_usb_info;
+    private TextView tv_rtc_info;
 
     private Uri uri = null;
 
@@ -105,6 +112,7 @@ public class MainActivity extends AppCompatActivity implements MediaPlayer.OnCom
 
     private static final int CALL_RESULT = 0x20;
     private static final int HUP_RESULT = 0x21;
+    private static final int RTC_RESULT = 0x22;
 
     //串口
     private boolean ttyALL_exit = true;
@@ -136,6 +144,7 @@ public class MainActivity extends AppCompatActivity implements MediaPlayer.OnCom
     private Button startRecording;
     private Button stopRecording;
     private Button playRecording;
+    private RecordManager rm = null;
 
     //摄像头相关
     private Map<UsbDevice, CameraResStruct> usbMap;
@@ -150,33 +159,34 @@ public class MainActivity extends AppCompatActivity implements MediaPlayer.OnCom
     private final MyHandler mHandler = new MyHandler(this);
 
     public void onStartRecording(View view) {
-        recorder = new MediaRecorder();
-        recorder.setAudioSource(MediaRecorder.AudioSource.MIC);
-        recorder.setOutputFormat(MediaRecorder.OutputFormat.THREE_GPP);
-        recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AMR_NB);
+//        recorder = new MediaRecorder();
+//        //recorder.setAudioSource(MediaRecorder.AudioSource.MIC);
+//        //recorder.setOutputFormat(MediaRecorder.OutputFormat.THREE_GPP);
+//       // recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AMR_NB);
+//
+//        File path = new File(Environment.getExternalStorageDirectory() + "/ceshi");
+//        path.mkdirs();
+//        try {
+//            audioFile = File.createTempFile("recording", ".3gp", path);
+//        } catch (IOException e) {
+//            e.printStackTrace();
+//        }
+//        //recorder.setOutputFile(audioFile.getAbsolutePath());
+//
+//        try {
+//            recorder.prepare();
+//        } catch (IllegalStateException e) {
+//            e.printStackTrace();
+//        } catch (IOException e) {
+//            e.printStackTrace();
+//        }
+//       // recorder.start();
+//
+//        isRecording = true;
+//        recordAmplitude = new RecordAmplitude();
+//        recordAmplitude.execute();
 
-        File path = new File(Environment.getExternalStorageDirectory() + "/ceshi");
-        path.mkdirs();
-        try {
-            audioFile = File.createTempFile("recording", ".3gp", path);
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-        recorder.setOutputFile(audioFile.getAbsolutePath());
-
-        try {
-            recorder.prepare();
-        } catch (IllegalStateException e) {
-            e.printStackTrace();
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-        recorder.start();
-
-        isRecording = true;
-        recordAmplitude = new RecordAmplitude();
-        recordAmplitude.execute();
-
+        rm.startRecord();
         statusTextView.setText("Recording");
 
         playRecording.setEnabled(false);
@@ -187,15 +197,17 @@ public class MainActivity extends AppCompatActivity implements MediaPlayer.OnCom
     public void onStopRecording(View view) {
         audioProgressBar.setProgress(0);
 
-        isRecording = false;
-        recordAmplitude.cancel(true);
-        recorder.stop();
-        recorder.release();
+//        isRecording = false;
+//        recordAmplitude.cancel(true);
+//        recorder.stop();
+//        recorder.release();
+        rm.stopRecord();
+
         player = new MediaPlayer();
         player.setOnCompletionListener(this);
 
         try {
-            player.setDataSource(audioFile.getAbsolutePath());
+            player.setDataSource(Environment.getExternalStorageDirectory() + "/ceshi");
         } catch (IllegalArgumentException e) {
             e.printStackTrace();
         } catch (SecurityException e) {
@@ -243,8 +255,35 @@ public class MainActivity extends AppCompatActivity implements MediaPlayer.OnCom
         mDevicePolicyManager.lockNow();
     }
 
+    public void onClose(View view) {
+        finish();
+    }
+
+    public void onStartTestWiFi(View view) {
+        startActivity(new Intent(android.provider.Settings.ACTION_WIFI_SETTINGS));
+    }
+
+    public void onStartTestRTC(View view) {
+        tv_rtc_info.setText("");
+        state = RTC_TEST;
+
+        vv_play.stopPlayback();
+        vv_play.setVisibility(View.GONE);
+        ll_serialport.setVisibility(View.GONE);
+        ll_usbdevices.setVisibility(View.GONE);
+        ll_camera.setVisibility(View.GONE);
+        ll_mic.setVisibility(View.GONE);
+        ll_call.setVisibility(View.GONE);
+        ll_network.setVisibility(View.GONE);
+
+        ll_rtc.setVisibility(View.VISIBLE);
+
+        new Thread(() -> testRtc()).start();
+    }
+
 
     class MyHandler extends Handler {
+        private String str_res;
         private WeakReference<MainActivity> mActivityRef;
 
         public MyHandler(MainActivity activity) {
@@ -284,7 +323,12 @@ public class MainActivity extends AppCompatActivity implements MediaPlayer.OnCom
                     tv.setText(String.valueOf(size));
                     break;
                 case PING_RESULT:
-                    activity.tv_network_test.setText("返回：" + msg.obj.toString());
+                    str_res = activity.tv_network_test.getText().toString();
+                    activity.tv_network_test.setText("返回：" + msg.obj.toString() + "\n" + str_res);
+                    break;
+                case RTC_RESULT:
+                    str_res = activity.tv_rtc_info.getText().toString();
+                    activity.tv_rtc_info.setText(msg.obj.toString() + "\n" + str_res);
                     break;
                 default:
                     break;
@@ -301,7 +345,27 @@ public class MainActivity extends AppCompatActivity implements MediaPlayer.OnCom
 
         initViews();
         initDatas();
+
+        //在这里动态申请文件读写权限
+        verifyStoragePermissions();
+        //====================>>>>>>>>>>>>
     }
+
+    //在大于23的android版本中,文件读写需要动态申请权限
+    private void verifyStoragePermissions() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if ((this.checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) ||
+                    (this.checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) ||
+                    (this.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED)) {
+                this.requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE, Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.RECORD_AUDIO}, 1);
+            } else {
+                Log.d(TAG, "已有权限,不需要再申请");
+                //mHandler.sendEmptyMessage(MyHandler.PERMISSION_ALLOW);
+                //doNext();
+            }
+        }
+    }
+
 
     private void initDatas() {
         serialports = new ArrayList<>();
@@ -330,10 +394,12 @@ public class MainActivity extends AppCompatActivity implements MediaPlayer.OnCom
 //        boolean hasUsbAccessory = getPackageManager().hasSystemFeature(PackageManager.FEATURE_USB_ACCESSORY);
 //        addText("hasUsbHost : " + hasUsbHost);
 //        addText("hasUsbAccessory : " + hasUsbAccessory);
+        Date date = new Date();
+        SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy年-MM月dd日-HH时mm分ss秒 E");
         if (AExecuteAsRoot.canRunRootCommands()) {
-            setTitle("     SU OK !");
+            setTitle("     SU OK !" + "    当前时间：" + dateFormat.format(date) + "  适用版本最低android 5.1");
         } else {
-            setTitle("     SU 不OK!");
+            setTitle("     SU 不OK!" + "    当前时间：" + dateFormat.format(date) + "  适用版本最低android 5.1");
         }
 
         audioProgressBar.setMax(100);
@@ -359,10 +425,12 @@ public class MainActivity extends AppCompatActivity implements MediaPlayer.OnCom
         ll_camera = findViewById(R.id.ll_camera);
         ll_mic = findViewById(R.id.ll_mic);
         ll_call = findViewById(R.id.ll_call);
+        ll_rtc = findViewById(R.id.ll_rtc);
 
         tv_network_test = findViewById(R.id.tv_network_test);
         tv_net_info = findViewById(R.id.tv_net_info);
         tv_usb_info = findViewById(R.id.tv_usb_info);
+        tv_rtc_info = findViewById(R.id.tv_rtc_info);
 
         mUSBMonitor = new USBMonitor(this, mOnDeviceConnectListener);
 
@@ -456,7 +524,7 @@ public class MainActivity extends AppCompatActivity implements MediaPlayer.OnCom
         for (File file1 : listFiles) {
             String ttyName = file1.getName();
             //名字大于3个字母，包含tty，第四个字母不是数字
-            if ((ttyName.length() > 3) && ttyName.contains("tty") && !Character.isDigit(ttyName.charAt(3))) {
+            if ((ttyName.length() > 3) && ((ttyName.contains("ttymxc")) || (ttyName.contains("ttyS")) || (ttyName.contains("ttyswk")) || (ttyName.contains("ttysWK")))) {
                 //Log.d(TAG, "=name=>>" + ttyName);
                 serialports.add(ttyName);
 
@@ -640,6 +708,34 @@ public class MainActivity extends AppCompatActivity implements MediaPlayer.OnCom
         }
     }
 
+    public boolean testRtc() {
+        //Log.d(TAG, "into testRtc");
+        String result = "";
+        while (state == RTC_TEST) {
+            ArrayList<String> commandList = new ArrayList<String>();
+            commandList.add("busybox hwclock -w");
+            ExecuteAsRoot executeAsRoot = new ExecuteAsRoot(commandList);
+            executeAsRoot.execute();
+
+            SystemClock.sleep(100);
+
+            commandList.clear();
+            commandList.add("busybox hwclock -r");
+            executeAsRoot = new ExecuteAsRoot(commandList);
+            result = executeAsRoot.execute();
+
+            Message msg = Message.obtain();
+            msg.what = RTC_RESULT;
+            msg.obj = result;
+            mHandler.sendMessage(msg);
+
+            SystemClock.sleep(1000);
+        }
+
+        //Log.d(TAG, "out testRtc ==>> " );
+        return false;
+    }
+
     public boolean isAvailableByPing(String ip) {
         if ((ip == null) || (ip.length() <= 0)) {
             ip = "192.168.1.1";
@@ -650,7 +746,8 @@ public class MainActivity extends AppCompatActivity implements MediaPlayer.OnCom
         String line = null;
         try {
             //-c 后边跟随的是重复的次数，-w后边跟随的是超时的时间，单位是秒，不是毫秒，要不然也不会anr了
-            ipProcess = runtime.exec("ping " + ip);
+            //-s 后面跟随的是包的大小
+            ipProcess = runtime.exec("ping -s 30720 " + ip);
             bufferedReader = new BufferedReader(new InputStreamReader(ipProcess.getInputStream()));
             while ((line = bufferedReader.readLine()) != null) {
                 Log.d("ping", "=line=>>" + line);
@@ -702,6 +799,12 @@ public class MainActivity extends AppCompatActivity implements MediaPlayer.OnCom
         super.onDestroy();
     }
 
+    @Override
+    protected void onResume() {
+        super.onResume();
+        onStartVideoTest(null);
+    }
+
     public void onStartVideoTest(View view) {
         state = VIDEO_TEST;
 
@@ -711,6 +814,7 @@ public class MainActivity extends AppCompatActivity implements MediaPlayer.OnCom
         ll_camera.setVisibility(View.GONE);
         ll_mic.setVisibility(View.GONE);
         ll_call.setVisibility(View.GONE);
+        ll_rtc.setVisibility(View.GONE);
 
         vv_play.setVisibility(View.VISIBLE);
         vv_play.start();
@@ -718,6 +822,7 @@ public class MainActivity extends AppCompatActivity implements MediaPlayer.OnCom
     }
 
     public void onStartNetworkTest(View view) {
+        tv_network_test.setText("");
         state = NET_TEST;
 
         vv_play.stopPlayback();
@@ -727,6 +832,7 @@ public class MainActivity extends AppCompatActivity implements MediaPlayer.OnCom
         ll_camera.setVisibility(View.GONE);
         ll_mic.setVisibility(View.GONE);
         ll_call.setVisibility(View.GONE);
+        ll_rtc.setVisibility(View.GONE);
 
         ll_network.setVisibility(View.VISIBLE);
 
@@ -747,6 +853,7 @@ public class MainActivity extends AppCompatActivity implements MediaPlayer.OnCom
         ll_camera.setVisibility(View.GONE);
         ll_mic.setVisibility(View.GONE);
         ll_call.setVisibility(View.GONE);
+        ll_rtc.setVisibility(View.GONE);
 
         ll_serialport.setVisibility(View.VISIBLE);
         ll_serialport.removeAllViews();
@@ -779,6 +886,7 @@ public class MainActivity extends AppCompatActivity implements MediaPlayer.OnCom
         ll_camera.setVisibility(View.GONE);
         ll_mic.setVisibility(View.GONE);
         ll_call.setVisibility(View.GONE);
+        ll_rtc.setVisibility(View.GONE);
 
         ll_usbdevices.setVisibility(View.VISIBLE);
 
@@ -810,6 +918,7 @@ public class MainActivity extends AppCompatActivity implements MediaPlayer.OnCom
         ll_serialport.setVisibility(View.GONE);
         ll_mic.setVisibility(View.GONE);
         ll_call.setVisibility(View.GONE);
+        ll_rtc.setVisibility(View.GONE);
 
         ll_camera.setVisibility(View.VISIBLE);
 
@@ -831,16 +940,19 @@ public class MainActivity extends AppCompatActivity implements MediaPlayer.OnCom
 
     private void buildSurfaceTexture(Context context, UsbDevice device, LinearLayout ll) {
         CameraResStruct cts = usbMap.get(device);
-        UVCCameraTextureView mUVCCameraView = cts.getmUVCCameraView();
-        if (mUVCCameraView == null) {
-            LinearLayout ll_temp = (LinearLayout) View.inflate(context, R.layout.cameraview_layout, null);
-            mUVCCameraView = ll_temp.findViewById(R.id.camera_view);
-            mUVCCameraView.setAspectRatio(UVCCamera.DEFAULT_PREVIEW_WIDTH / (float) UVCCamera.DEFAULT_PREVIEW_HEIGHT);
-            LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(250, 200);
-            llp.leftMargin = 10;
-            ll.addView(ll_temp, llp);
-            cts.setmUVCCameraView(mUVCCameraView);
+        if (cts != null) {
+            UVCCameraTextureView mUVCCameraView = cts.getmUVCCameraView();
+            if (mUVCCameraView == null) {
+                LinearLayout ll_temp = (LinearLayout) View.inflate(context, R.layout.cameraview_layout, null);
+                mUVCCameraView = ll_temp.findViewById(R.id.camera_view);
+                mUVCCameraView.setAspectRatio(UVCCamera.DEFAULT_PREVIEW_WIDTH / (float) UVCCamera.DEFAULT_PREVIEW_HEIGHT);
+                LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(250, 200);
+                llp.leftMargin = 10;
+                ll.addView(ll_temp, llp);
+                cts.setmUVCCameraView(mUVCCameraView);
+            }
         }
+
     }
 
     private void openCameraDevice(final USBMonitor.UsbControlBlock ctrlBlock, UVCCameraTextureView mUVCCameraView) {
@@ -1013,15 +1125,25 @@ public class MainActivity extends AppCompatActivity implements MediaPlayer.OnCom
         Log.d(TAG, "onStartMicTest: ");
         state = MIC_TEST;
 
+        vv_play.stopPlayback();
         vv_play.setVisibility(View.GONE);
         ll_network.setVisibility(View.GONE);
         ll_usbdevices.setVisibility(View.GONE);
         ll_serialport.setVisibility(View.GONE);
         ll_camera.setVisibility(View.GONE);
         ll_call.setVisibility(View.GONE);
+        ll_rtc.setVisibility(View.GONE);
 
         ll_mic.setVisibility(View.VISIBLE);
+        playRecording.setEnabled(true);
+        stopRecording.setEnabled(true);
+        startRecording.setEnabled(true);
+        statusTextView.setText("Ready");
 
+        if (rm == null){
+            File path = new File(Environment.getExternalStorageDirectory() + "/ceshi");
+            rm = new RecordManager(path,audioProgressBar);
+        }
     }
 
     private void saveConfig(String pid, int productId) {
@@ -1249,13 +1371,6 @@ public class MainActivity extends AppCompatActivity implements MediaPlayer.OnCom
         @Override
         public void onDettach(final UsbDevice device) {
             Log.v(TAG, "onDettach:");
-            //Toast.makeText(MainActivity.this, "USB_DEVICE_DETACHED", Toast.LENGTH_SHORT).show();
-//            if (device.getProductId() == mDualFaceConfig.getPidL()) {
-//                mLeftControlBlock = null;
-//            }
-//            if (device.getProductId() == mDualFaceConfig.getPidR()) {
-//                mRightControlBlock = null;
-//            }
         }
 
         @Override
@@ -1371,7 +1486,13 @@ public class MainActivity extends AppCompatActivity implements MediaPlayer.OnCom
                 } catch (Exception e) {
                     e.printStackTrace();
                 }
-                publishProgress(recorder.getMaxAmplitude());
+                AudioManager audioManager = null;
+               // audioManager.setMode(AudioManager.ROUTE_SPEAKER);
+                int currVolume = audioManager.getStreamVolume(AudioManager.STREAM_VOICE_CALL);
+
+                int value = recorder.getMaxAmplitude();
+                Log.d(TAG, "==getMaxAmplitude=>>" + value + "=new currVolume=>>" + currVolume);
+                publishProgress(value);
             }
             return null;
         }
@@ -1379,6 +1500,7 @@ public class MainActivity extends AppCompatActivity implements MediaPlayer.OnCom
         @Override
         protected void onProgressUpdate(Integer... values) {
             super.onProgressUpdate(values);
+            Log.d(TAG, "==>>" + values[0]);
             audioProgressBar.setProgress(values[0] % 100);
         }
     }
@@ -1413,7 +1535,7 @@ public class MainActivity extends AppCompatActivity implements MediaPlayer.OnCom
                 if (grantResults.length > 0
                         && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                     // 授权成功，继续打电话
-                    callPhone(tel);
+                    //callPhone(tel);
                 } else {
                     // 授权失败！
                     Toast.makeText(this, "授权失败！", Toast.LENGTH_LONG).show();

@@ -59,13 +59,16 @@ public abstract class AExecuteAsRoot {
         return retval;
     }
 
-    public final boolean execute() {
+    public final String execute() {
         boolean retval = false;
+        Runtime runtime = Runtime.getRuntime();
+        Process process = null;
+        StringBuffer output = new StringBuffer();
 
         try {
             ArrayList<String> commands = getCommandsToExecute();
             if (null != commands && commands.size() > 0) {
-                Process process = Runtime.getRuntime().exec("su");
+                process = runtime.exec("su");
 
                 DataOutputStream os = new DataOutputStream(process.getOutputStream());
 
@@ -81,10 +84,13 @@ public abstract class AExecuteAsRoot {
                         process.getInputStream()));
                 int read;
                 char[] buffer = new char[4096];
-                StringBuffer output = new StringBuffer();
-                while ((read = reader.read(buffer)) > 0) {
-                    output.append(buffer, 0, read);
+                String line = null;
+                while ((line = reader.readLine()) != null) {
+                    output.append(line);
                 }
+//                while ((read = reader.read(buffer)) > 0) {
+//                    output.append(buffer, 0, read);
+//                }
                 reader.close();
 
                 try {
@@ -105,9 +111,15 @@ public abstract class AExecuteAsRoot {
             Log.w("ROOT", "Can't get root access", ex);
         } catch (Exception ex) {
             Log.w("ROOT", "Error executing internal operation", ex);
+        }  finally {
+            //在结束的时候应该对资源进行回收
+            if (process != null) {
+                process.destroy();
+            }
+            runtime.gc();
         }
 
-        return retval;
+        return output.toString();
     }
 
     protected abstract ArrayList<String> getCommandsToExecute();
